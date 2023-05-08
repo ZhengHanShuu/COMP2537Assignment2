@@ -1,0 +1,52 @@
+<%- include("templates/header") %>
+<h1> User </h1> 
+  <ul>
+    <% users.forEach((user) => { %>
+      <li>
+        <%= user.username %> - <%= user.user_type %>
+        <a class="promote-button btn btn-danger rounded-pill px-3" type="button"  data-username="<%= user.username %>">Promote to Admin</a>
+        <a class="demote-button btn btn-success rounded-pill px-3" type="button"  data-username="<%= user.username %>">Demote to User</a>
+      </li>
+    <% }); %>
+  </ul>
+
+  <script>
+    const promoteButtons = document.querySelectorAll('.promote-button');
+    promoteButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const username = button.dataset.username;
+        promoteUser(username);
+      });
+    });
+
+    const demoteButtons = document.querySelectorAll('.demote-button');
+    demoteButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const username = button.dataset.username;
+        demoteUser(username);
+      });
+    });
+
+    function promoteUser(username) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/promote');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.onload = function() {
+        // Update the UI if needed
+        window.location.reload();
+      };
+      xhr.send(JSON.stringify({username: username}));
+    }
+
+    function demoteUser(username) {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/demote');
+      xhr.setRequestHeader('Content-Type', 'application/json');
+      xhr.onload = function() {
+        // Update the UI if needed
+        window.location.reload();
+      };
+      xhr.send(JSON.stringify({username: username}));
+    }
+  </script>
+<%- include("templates/footer") %> 

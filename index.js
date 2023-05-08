@@ -13,7 +13,6 @@ const app = express();
 
 const Joi = require("joi");
 
-
 const expireTime = 1 * 60 * 60 * 1000; //expires after 1 hour  (hours * minutes * seconds * millis)
 
 /* secret information section */
@@ -29,6 +28,8 @@ const node_session_secret = process.env.NODE_SESSION_SECRET;
 var {database} = include('databaseConnection');
 
 const userCollection = database.db(mongodb_database).collection('users');
+
+app.set('view engine', 'ejs');
 
 app.use(express.urlencoded({extended: false}));
 
@@ -47,94 +48,56 @@ app.use(session({
 }
 ));
 
+function isValidSession(req) {
+  if (req.session.authenticated) {
+      return true;
+  }
+  return false;
+}
+
+function sessionValidation(req,res,next) {
+  if (isValidSession(req)) {
+      next();
+  }
+  else {
+      res.redirect('/login');
+  }
+}
+
+function isAdmin(req) {
+  if (req.session.user_type == "admin") {
+      return true;
+  }
+  return false;
+}
+
+function adminAuthorization(req, res, next) {
+  if (!isAdmin(req)) {
+      res.status(403);
+      res.render("errorMessage", {error: "Not Authorized"});
+      return;
+  }
+  else {
+      next();
+  }
+}
+
 app.get('/', (req,res) => {
-    var html = `
-      <form method='get'>
-        <div>
-          <button formaction='/createUser'>Sign Up</button>
-        </div>
-        <div>
-          <button formaction='/login'>Log In</button>
-        </div>
-      </form>
-    `;
-    var html1 = `
-    <h1>Hello, ${req.session.username}!</h1>
-    <form method = 'get'>
-    <div>
-        <button formaction='/members'>Members Area</button>
-    </div>
-    <div>
-        <button formaction='/logout'>Log Out</button>
-    </div>
-    </form>
-    `
+  const username = req.session.username;
     if(!req.session.authenticated){
-      res.send(html);
+      res.render("index");
     }else {
-      res.send(html1);
+      res.render("index1", {username});
     }
 });
 
-app.get('/nosql-injection', async (req,res) => {
-	var username = req.query.user;
-
-	if (!username) {
-		res.send(`<h3>no user provided - try /nosql-injection?user=name</h3> <h3>or /nosql-injection?user[$ne]=name</h3>`);
-		return;
-	}
-	console.log("user: "+username);
-
-	const schema = Joi.string().max(20).required();
-	const validationResult = schema.validate(username);
-
-	//If we didn't use Joi to validate and check for a valid URL parameter below
-	// we could run our userCollection.find and it would be possible to attack.
-	// A URL parameter of user[$ne]=name would get executed as a MongoDB command
-	// and may result in revealing information about all users or a successful
-	// login without knowing the correct password.
-	if (validationResult.error != null) {  
-	   console.log(validationResult.error);
-	   res.send("<h1 style='color:darkred;'>A NoSQL injection attack was detected!!</h1>");
-	   return;
-	}	
-
-	const result = await userCollection.find({username: username}).project({username: 1, password: 1, _id: 1}).toArray();
-
-	console.log(result);
-
-    res.send(`<h1>Hello ${username}</h1>`);
-});
-
 app.get('/createUser', (req,res) => {
-    var html = `
-    <h1>Create User</h1>
-    <form method="POST" action="/submitUser">
-      <label for="name">Name:</label>
-      <input type="text" name="username" id="name" required><br>
-      <label for="email">Email:</label>
-      <input type="email" name="email" id="email" required><br>
-      <label for="password">Password:</label>
-      <input type="password" name="password" id="password" required><br>
-      <input type="submit" value="Submit">
-    </form>
-  `;
-    res.send(html);
+    res.render("createUser");
 });
 
 
 app.get('/login', (req,res) => {
-    var html = `
-    <h1>Log In</h1>
-    <form method="POST" action="/loggingin">
-      <label for="email">Email:</label>
-      <input type="email" name="email" id="email" required><br>
-      <label for="password">Password:</label>
-      <input type="password" name="password" id="password" required><br>
-      <input type="submit" value="Submit">
-    </form>
-  `;
-    res.send(html);
+    res.render("login");
 });
 
 app.post('/submitUser', async (req,res) => {
@@ -158,7 +121,7 @@ app.post('/submitUser', async (req,res) => {
 
     var hashedPassword = await bcrypt.hash(password, saltRounds);
 	
-	await userCollection.insertOne({email: email, username: username, password: hashedPassword});
+	await userCollection.insertOne({email: email, username: username, password: hashedPassword, user_type: "user"});
 	console.log("Inserted user");
   console.log(req.session.username);
   req.session.authenticated = true;
@@ -180,7 +143,7 @@ app.post('/loggingin', async (req,res) => {
   }
 
   const result = await userCollection.find({email: email})
-    .project({email: 1, password: 1, username: 1, _id: 1})
+    .project({email: 1, password: 1, username: 1, user_type: 1, _id: 1})
     .toArray();
 
   console.log(result);
@@ -195,15 +158,12 @@ app.post('/loggingin', async (req,res) => {
       req.session.email = email;
       req.session.cookie.maxAge = expireTime;
       req.session.username = result[0].username;
+      req.session.user_type = result[0].user_type;
       res.redirect('/members');
       return;
   }
   else {
-      var html = `
-      invalid password!
-      <a href= "/login">try again</a>
-      `;
-      res.send(html);
+      res.render("invalidPassword");
       console.log("incorrect password");
       return;
   }
@@ -213,11 +173,6 @@ app.get('/loggedin', (req,res) => {
     if (!req.session.authenticated) {
         res.redirect('/login');
     }
-    var html = `
-    You are logged in!
-    <a href="/logout">Log Out</a>
-    `;
-    res.send(html);
 });
 
 app.use(express.static('public'));
@@ -226,16 +181,44 @@ app.get('/members', (req,res) => {
   if (!req.session.authenticated) {
       res.redirect('/login');
   } else {
-    var username = req.session.username;
-    var imageIndex = Math.floor(Math.random() * 2) + 1;
-    var imagePath = `Cute${imageIndex}.gif`;
-    var html = `
-    <h1>Hello, ${username}!</h1>
-    <img src="${imagePath}">
-    <a href="/logout">logout</a>
-    `;
-    res.send(html);
+    const username = req.session.username;
+    var imageIndex = Math.floor(Math.random() * 3) + 1;
+    const imagePath = `Cute${imageIndex}.gif`;
+    res.render("members", {username, imagePath});
   }
+});
+
+app.get('/admin', sessionValidation, adminAuthorization, async (req,res) => {
+  const result = await userCollection.find().project({username: 1, user_type: 1, _id: 1}).toArray();
+
+  res.render("admin", {users: result});
+});
+
+app.post('/promote', sessionValidation, adminAuthorization, async (req, res) => {
+  const username = req.session.username;
+  const result = await userCollection.updateOne({username: username}, {$set: {user_type: 'admin'}});
+
+  if (result.modifiedCount == 1) {
+    console.log(`Promoted user ${username}`);
+  }
+  else {
+    console.log(`Failed to promote user ${username}`);
+  }
+  res.redirect('/admin');
+});
+
+app.post('/demote', sessionValidation, adminAuthorization, async (req, res) => {
+  const username = req.session.username;
+  const result = await userCollection.updateOne({username: username}, {$set: {user_type: 'user'}});
+
+  if (result.modifiedCount == 1) {
+    console.log(`Demoted user ${username}`);
+  }
+  else {
+    console.log(`Failed to demote user ${username}`);
+  }
+
+  res.redirect('/admin');
 });
 
 app.get('/logout', (req,res) => {
@@ -243,9 +226,13 @@ app.get('/logout', (req,res) => {
   res.redirect('/');
 });
 
+app.get('/cuteGif', (req,res) => {
+  res.render("cuteGif");
+});
+
 app.get("*", (req,res) => {
 	res.status(404);
-	res.send("Page not found - 404");
+	res.render("404");
 })
 
 app.listen(port, () => {
